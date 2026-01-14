@@ -11,24 +11,15 @@ Start the server (binds to 127.0.0.1:9090 by default, set `SERVER_ADDR` to chang
 ```bash
 # from repository root
 cargo run --bin server
-# or to allow external machines to connect (bind to 0.0.0.0:9090):
-SERVER_ADDR=0.0.0.0:9090 cargo run --bin server
 ```
 
 Start a client. When using `cargo run` you must pass `--` before program args so Cargo doesn't consume them.
 
 ```bash
 # pass a display name to register on connect
-cargo run --bin client -- kai
+cargo run --bin client -- <name>
 # or run without a name and register later in the client using the :name command
 cargo run --bin client
-```
-
-If you built the project already you can run the produced binaries directly:
-
-```bash
-target/debug/server
-target/debug/client kai
 ```
 
 ## Commands
