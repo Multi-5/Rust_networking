@@ -1,6 +1,7 @@
 
 use std::io::{self, ErrorKind, Read, Write};
 use std::net::TcpStream;
+use std::env;
 use std::sync::mpsc::{self, TryRecvError};
 use std::thread;
 use std::time::Duration;
@@ -19,12 +20,15 @@ fn main() {
         match client.read_exact(&mut buff) {
             Ok(_) => {
                 let msg = buff.into_iter().take_while(|&x| x != 0).collect::<Vec<_>>();
-                println!("message recv {:?}", msg);
+                match String::from_utf8(msg) {
+                    Ok(s) => println!("{}", s),
+                    Err(e) => println!("message recv (invalid utf8): {:?}", e.into_bytes()),
+                }
             },
             Err(ref err) if err.kind() == ErrorKind::WouldBlock => (),
             Err(_) => {
                 println!("connection with server was severed");
-                break;
+                std::process::exit(0);
             }
         }
 
@@ -32,8 +36,10 @@ fn main() {
             Ok(msg) => {
                 let mut buff = msg.clone().into_bytes();
                 buff.resize(MSG_SIZE, 0);
-                client.write_all(&buff).expect("writing to socket failed");
-                println!("message sent {:?}", msg);
+                if let Err(_) = client.write_all(&buff) {
+                    println!("connection with server was severed");
+                    std::process::exit(0);
+                }
             }, 
             Err(TryRecvError::Empty) => (),
             Err(TryRecvError::Disconnected) => break
@@ -41,6 +47,20 @@ fn main() {
 
         thread::sleep(Duration::from_millis(100));
     });
+
+    // If a name was supplied as CLI args, send registration to server.
+    // Accept either: `client <name>` or `client :name <name>` for convenience.
+    let mut args = env::args().skip(1);
+    if let Some(first) = args.next() {
+        if first == ":name" {
+            if let Some(name) = args.next() {
+                let _ = tx.send(format!(":name {}", name));
+            }
+        } else {
+            // treat first arg as the name directly
+            let _ = tx.send(format!(":name {}", first));
+        }
+    }
 
     println!("Write a Message:");
     loop {
