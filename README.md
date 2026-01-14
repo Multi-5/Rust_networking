@@ -45,6 +45,3 @@ The client supports a few simple text commands. Send commands by typing them and
 
 - If you run the client via `cargo run --bin client` and want to pass a name argument, remember to add `--` before the name so Cargo forwards it to the program (`cargo run --bin client -- kai`).
 - The server uses a fixed-size message frame (120 bytes). Messages longer than that will be truncated. Consider switching to a length-prefixed protocol if you need arbitrary-length messages.
-- To allow remote connections, bind the server to `0.0.0.0` or set up proper port-forwarding in your router and firewall rules.
-
-If you want I can add automatic client-side retry when receiving `name_taken` responses or implement graceful server shutdown announcements.
