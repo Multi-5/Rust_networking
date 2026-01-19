@@ -90,7 +90,7 @@ fn main() {
                     let content = &recv_msg[pos + 3..];
 
                     if content.starts_with(":name ") {
-                        fun_name(&mut clients, &mut name_rejected, sender, content);
+                        try_client_name_change(&mut clients, &mut name_rejected, sender, content);
 
                         continue;
                     }
@@ -135,7 +135,12 @@ fn main() {
     }
 }
 
-fn fun_name(clients: &mut Vec<(TcpStream, String, String)>, name_rejected: &mut HashSet<String>, sender: &str, content: &str) {
+fn try_client_name_change(
+    clients: &mut Vec<(TcpStream, String, String)>, 
+    name_rejected: &mut HashSet<String>, 
+    sender: &str, 
+    content: &str
+) {
     // registration: try to update the stored display name for this client
     let name = content[6..].to_string();
     println!("Registering name '{}' for {}", name, sender);
@@ -146,36 +151,49 @@ fn fun_name(clients: &mut Vec<(TcpStream, String, String)>, name_rejected: &mut 
         let reject = format!("name_taken: {}\nchange the name with :name <new_name>", name);
         let mut buf = reject.into_bytes();
         buf.resize(MSG_SIZE, 0);
-        *clients = clients.into_iter().map(|(mut client, addr, disp)| {
+        let old_clients = std::mem::take(clients);
+
+        *clients = old_clients
+        .into_iter()
+        .map(|(mut client, addr, disp)| {
             if addr == sender {
-                // notify the registering client that the name was taken
                 let _ = client.write_all(&buf);
-                // record that this sender was rejected so a later successful registration can be confirmed
                 name_rejected.insert(addr.clone());
             }
             (client, addr, disp)
-        }).collect();
+        })
+        .collect();
     } else {
         // accept the registration and update the stored display name
-        *clients = clients.into_iter().map(|(stream, addr, _disp)| {
-            if addr == sender {
-                (stream, addr.clone(), name.clone())
-            } else {
-                (stream, addr, _disp)
-            }
-        }).collect();
+        
+        let old_clients = std::mem::take(clients);
 
+        *clients = old_clients
+            .into_iter()
+            .map(|(stream, addr, disp)| {
+                if addr == sender {
+                    (stream, addr, name.clone())
+                } else {
+                    (stream, addr, disp)
+                }
+            })
+            .collect();
         // If this sender was previously rejected, send a one-off confirmation to them
         if name_rejected.remove(sender) {
             let confirm = format!("{} is unique and was appended to your client!", name);
             let mut confirm_buf = confirm.as_bytes().to_vec();
             confirm_buf.resize(MSG_SIZE, 0);
-            *clients = clients.into_iter().map(|(mut client, addr, disp)| {
+            let old_clients = std::mem::take(clients);
+
+            *clients = old_clients
+            .into_iter()
+            .map(|(mut client, addr, disp)| {
                 if addr == sender {
                     let _ = client.write_all(&confirm_buf);
                 }
                 (client, addr, disp)
-            }).collect();
+            })
+            .collect();
         }
 
         // announce join to others (don't send the join announcement back to the registering client)
@@ -183,14 +201,20 @@ fn fun_name(clients: &mut Vec<(TcpStream, String, String)>, name_rejected: &mut 
         println!("Announcing: {}", announce);
         let mut to_send = announce.into_bytes();
         to_send.resize(MSG_SIZE, 0);
-        *clients = clients.into_iter().filter_map(|(mut client, addr, disp)| {
+        let old_clients = std::mem::take(clients);
+
+        *clients = old_clients
+        .into_iter()
+        .filter_map(|(mut client, addr, disp)| {
             if addr == sender {
-                // keep the registering client but don't send the announce back to it
                 Some((client, addr, disp))
             } else {
                 client.write_all(&to_send).map(|_| (client, addr, disp)).ok()
             }
-        }).collect();
+        })
+        .collect();
+
     }
 }
+
 
