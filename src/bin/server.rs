@@ -5,192 +5,54 @@ use rand::Rng;
 use std::sync::mpsc;
 use std::collections::HashSet;
 use std::thread;
-use serde::{Serialize, Deserialize};
 
 
 // Default bind address. Can be overridden with the SERVER_ADDR env var, e.g.
 // SERVER_ADDR=127.0.0.1 :9090 cargo run --bin server
 // Using 127.0.0.1 lets other machines connect to this host.
 const DEFAULT_LOCAL: &str = "127.0.0.1:9090";
-const MSG_SIZE: usize = 120;
+const MSG_SIZE: usize = 500;
 
-
-const HANGMAN_STRINGS: [&'static str; 10] = [
-r#"
- 
- 
- 
- 
-n∩"#,
-r"
- |
- |
- |
- |
-n∩",
-r" ____
- |
- |
- |
- |
-n∩",
-r" ____
- |  !
- |
- |
- |
-n∩",
-r" ____
- |  !
- |  o
- |
- |
-n∩",
-r"____
- |  !
- |  o
- |  |
- |
-n∩",
-r"____
- |  !
- | \o
- |  |
- |
-n∩",
-r"____
- |  !
- | \o
- |  |\
- |
-n∩",
-r"____
- |  !
- | \o
- |  |\
- |   \
-n∩",
-r" ____
- |  !
- | \o
- |  |\
- | / \
-n∩"
-];
-
-
+//allows loop to rest while it's not receiving messages
+//will allow the thread to sleep for a moment, and we can call it passing the time duration
 fn sleep() {
     thread::sleep(::std::time::Duration::from_millis(100));
 }
-
-#[derive(Serialize, Deserialize)]
-struct GameState {
-    secret_word: String,
-    guessed_letters: Vec<char>,
-    guesser_name: String,
-    word_suggester_name: String,
-}
-
-
-fn display_hangman_state(state: &GameState) {
-    let displayed_word: String = state.secret_word
-        .chars()
-        .map(|letter| {
-            if state.guessed_letters.contains(&letter.to_lowercase().next().unwrap()) {
-                letter
-            } else {
-                '_'
-            }
-        })
-        .collect();
-
-    println!("Word: {}", displayed_word);
-
-    // Display previous guesses
-    if state.guessed_letters.is_empty() {
-        println!("Start with your guesses!");
-    } else {
-        println!("Guessed letters: {}", 
-            state.guessed_letters.iter().collect::<String>()
-        );
-    }
-
-    let incorrect_guesses = state.guessed_letters
-        .iter()
-        .filter(|&letter| 
-            !state.secret_word.to_lowercase().contains(letter.to_lowercase().to_string().as_str())
-        )
-        .count();
-
-    if incorrect_guesses > 0 {
-        println!("Incorrect guesses: {}", incorrect_guesses);
-        println!("{}", HANGMAN_STRINGS[incorrect_guesses]);
-    }
-}
-
-
-fn check_letter(input: &str, game_state: &mut GameState) -> Result<bool, String> {
-    // Check if input is exactly one letter
-    if input.chars().count() != 1 {
-        return Err(String::from("Please enter exactly one letter"));
-    }
-
-    // Convert input to lowercase
-    let letter = input.chars().next().unwrap().to_lowercase().next().unwrap();
-
-    // Check if letter was already guessed
-    if game_state.guessed_letters.contains(&letter) {
-        return Err(String::from("You already guessed this letter"));
-    }
-
-    // Add letter to guessed letters
-    game_state.guessed_letters.push(letter);
-
-    // Check if letter is in the secret word
-    let letter_in_word = game_state.secret_word
-        .to_lowercase()
-        .chars()
-        .any(|c| c == letter);
-
-    Ok(letter_in_word)
-}
-
-
-fn create_hangman_match(pl_creator: &str, word: &str, pl_guesser: &str) -> GameState {
-    let mut game = GameState {
-        secret_word: String::from(word),
-        guessed_letters: Vec::new(),
-        guesser_name: String::from(pl_guesser),
-        word_suggester_name: String::from(pl_creator),
-    };
-    game
-}
-// Example usage
-fn check_examples() {
-
-    let mut game: GameState = create_hangman_match("a", "Hangman", "player");
-
-    // Successful guess
-    match check_letter("h", &mut game) {
-        Ok(true) => println!("Letter is in the word!"),
-        Ok(false) => println!("Letter is not in the word."),
-        Err(e) => println!("Error: {}", e),
-    }
-
-    // Duplicate guess
-    match check_letter("h", &mut game) {
-        Ok(true) => println!("Letter is in the word!"),
-        Ok(false) => println!("Letter is not in the word."),
-        Err(e) => println!("Error: {}", e),
-    }
-}
-
 
 
 fn flip_coin() -> &'static str {
     //  flip a coin: 50/50
     let mut rng = rand::thread_rng();
     if rng.gen_bool(0.5) { "heads" } else { "tails" }
+}
+
+// Helper: send buffer to all clients, removing any that fail
+fn send_to_all(clients: &mut Vec<(TcpStream, String, String)>, buf: &[u8]) {
+    let mut remove_idx: Vec<usize> = Vec::new();
+    for (i, (client, _addr, _disp)) in clients.iter_mut().enumerate() {
+        if client.write_all(buf).is_err() { remove_idx.push(i); }
+    }
+    for i in remove_idx.into_iter().rev() { clients.remove(i); }
+}
+
+// Helper: send buffer to all clients except the sender (by addr); remove failed clients
+fn send_to_others(clients: &mut Vec<(TcpStream, String, String)>, sender: &str, buf: &[u8]) {
+    let mut remove_idx: Vec<usize> = Vec::new();
+    for (i, (client, addr, _disp)) in clients.iter_mut().enumerate() {
+        if addr == sender { continue; }
+        if client.write_all(buf).is_err() { remove_idx.push(i); }
+    }
+    for i in remove_idx.into_iter().rev() { clients.remove(i); }
+}
+
+// Helper: send buffer only to a single client (by addr). Does not remove other clients on failure.
+fn send_to_client(clients: &mut Vec<(TcpStream, String, String)>, recipient: &str, buf: &[u8]) {
+    for (client, addr, _disp) in clients.iter_mut() {
+        if addr == recipient {
+            let _ = client.write_all(buf);
+            break;
+        }
+    }
 }
 
 fn main() {
@@ -221,7 +83,7 @@ fn main() {
                         let msg = buff.into_iter().take_while(|&x| x != 0).collect::<Vec<_>>();
                         let msg = String::from_utf8(msg).expect("Invalid utf8 message");
 
-                        // Command handling: keep :flip server-side; other messages forwarded
+                        // Command handling: keep :flip and :list server-side; other messages forwarded
                         match msg.as_str() {
                             ":flip" => {
                                 let result = flip_coin();
@@ -229,6 +91,11 @@ fn main() {
                                 // send framed message so main thread can map addr -> name
                                 let framed = format!("[{}]::flipped: {}", addr, result);
                                 tx.send(framed).expect("failed to send flip result to rx");
+                            }
+                            ":list" => {
+                                // request the main loop to send the (multi-line) user list
+                                let framed = format!("[{}]::{}", addr, msg);
+                                tx.send(framed).expect("failed to send list request to rx");
                             }
                             _ => {
                                 // Prefix with sender addr so main thread can identify sender
@@ -256,63 +123,71 @@ fn main() {
                     let content = &recv_msg[pos + 3..];
 
                     if content.starts_with(":name ") {
-                        // registration: try to update the stored display name for this client
+                        // registration: update the stored display name for this client
                         let name = content[6..].to_string();
                         println!("Registering name '{}' for {}", name, sender);
 
-                        // If the name is already taken by another client (different addr), inform the registering client only
+                        // If the name is already taken by another client (different addr), inform the new client only
                         let name_taken = clients.iter().any(|(_, addr, disp)| addr != sender && disp == &name);
                         if name_taken {
                             let reject = format!("name_taken: {}\nchange the name with :name <new_name>", name);
                             let mut buf = reject.into_bytes();
                             buf.resize(MSG_SIZE, 0);
-                            clients = clients.into_iter().map(|(mut client, addr, disp)| {
-                                if addr == sender {
-                                    // notify the registering client that the name was taken
-                                    let _ = client.write_all(&buf);
-                                    // record that this sender was rejected so a later successful registration can be confirmed
-                                    name_rejected.insert(addr.clone());
-                                }
-                                (client, addr, disp)
-                            }).collect();
+                            // notify the registering client (by addr) without moving the clients vec
+                            send_to_client(&mut clients, sender, &buf);
+                            // record that this sender was rejected so a later successful registration can be confirmed
+                            name_rejected.insert(sender.to_string());
                         } else {
-                            // accept the registration and update the stored display name
-                            clients = clients.into_iter().map(|(stream, addr, _disp)| {
+                            // determine previous display name for this sender
+                            let mut previous_name: Option<String> = None;
+                            for (_stream, addr, disp) in clients.iter() {
                                 if addr == sender {
-                                    (stream, addr.clone(), name.clone())
-                                } else {
-                                    (stream, addr, _disp)
+                                    previous_name = Some(disp.clone());
+                                    break;
                                 }
-                            }).collect();
+                            }
+
+                            // accept the registration and update the stored display name (in-place)
+                            for (_stream, addr, disp) in clients.iter_mut() {
+                                if addr == sender {
+                                    *disp = name.clone();
+                                }
+                            }
 
                             // If this sender was previously rejected, send a one-off confirmation to them
                             if name_rejected.remove(sender) {
                                 let confirm = format!("{} is unique and was appended to your client!", name);
                                 let mut confirm_buf = confirm.as_bytes().to_vec();
                                 confirm_buf.resize(MSG_SIZE, 0);
-                                clients = clients.into_iter().map(|(mut client, addr, disp)| {
-                                    if addr == sender {
-                                        let _ = client.write_all(&confirm_buf);
-                                    }
-                                    (client, addr, disp)
-                                }).collect();
+                                send_to_client(&mut clients, sender, &confirm_buf);
                             }
 
-                            // announce join to others (don't send the join announcement back to the registering client)
-                            let announce = format!("{} joined", name);
+                            // Announce either a join or a name-change to other clients
+                            let announce = match previous_name {
+                                Some(prev) if prev != sender && prev != name => format!("{} changed the name to {}", prev, name),
+                                _ => format!("{} joined", name),
+                            };
                             println!("Announcing: {}", announce);
                             let mut to_send = announce.into_bytes();
                             to_send.resize(MSG_SIZE, 0);
-                            clients = clients.into_iter().filter_map(|(mut client, addr, disp)| {
-                                if addr == sender {
-                                    // keep the registering client but don't send the announce back to it
-                                    Some((client, addr, disp))
-                                } else {
-                                    client.write_all(&to_send).map(|_| (client, addr, disp)).ok()
-                                }
-                            }).collect();
+                            // send announcement to others
+                            send_to_others(&mut clients, sender, &to_send);
                         }
 
+                        continue;
+                    }
+
+                    // list connected users (send only to requesting client)
+                    if content == ":list" {
+                        // build a multi-line list of display names (one per line)
+                        let mut resp = String::from("connected:\n");
+                        for (_, _, disp) in &clients {
+                            resp.push_str(&format!("{}\n", disp));
+                        }
+                        let mut buf = resp.into_bytes();
+                        buf.resize(MSG_SIZE, 0);
+                        // write only to the requesting client (don't move the clients vec)
+                        send_to_client(&mut clients, sender, &buf);
                         continue;
                     }
 
@@ -328,27 +203,18 @@ fn main() {
                     // If this is a coin-flip result (content starts with "flipped:"), send to everyone including sender.
                     // Otherwise, avoid sending the message back to the originating client to prevent duplicate echo.
                     if content.starts_with("flipped:") {
-                        clients = clients.into_iter().filter_map(|(mut client, addr, disp)| {
-                            client.write_all(&buff).map(|_| (client, addr, disp)).ok()
-                        }).collect();
+                        // broadcast to all; remove clients that fail
+                        send_to_all(&mut clients, &buff);
                     } else {
-                        clients = clients.into_iter().filter_map(|(mut client, addr, disp)| {
-                            if addr == sender {
-                                // keep the sender in the clients list but don't write the message back
-                                Some((client, addr, disp))
-                            } else {
-                                client.write_all(&buff).map(|_| (client, addr, disp)).ok()
-                            }
-                        }).collect();
+                        // send to others only; keep sender always
+                        send_to_others(&mut clients, sender, &buff);
                     }
                 }
             } else {
                 // not framed: broadcast raw
                 let mut buff = recv_msg.into_bytes();
                 buff.resize(MSG_SIZE, 0);
-                clients = clients.into_iter().filter_map(|(mut client, addr, disp)| {
-                    client.write_all(&buff).map(|_| (client, addr, disp)).ok()
-                }).collect();
+                send_to_all(&mut clients, &buff);
             }
         }
 

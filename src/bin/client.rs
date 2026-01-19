@@ -7,7 +7,7 @@ use std::thread;
 use std::time::Duration;
 
 const LOCAL: &str = "127.0.0.1:9090";
-const MSG_SIZE: usize = 120;
+const MSG_SIZE: usize = 500;
 
 fn main() {
     let mut client = TcpStream::connect(LOCAL).expect("Stream failed to connect");
@@ -73,8 +73,10 @@ fn main() {
 
 }
 
-// To run this program you need to open 2 terminals. One for the client and one for the server. 
-// In the server run `cargo run`. 
-// Then do the same in your client. And this time you should see a message, `write a message`. 
-// Type something and then you should see that in the server. 
-// If you type ':quit' then the program will quit...
+/*  
+To run this program you need to open 2 terminals. One for the client and one for the server. 
+In the server run `cargo run`. 
+Then do the same in the client. And this time you should see a message, `write a message`. 
+Type something and then you should see that in the server. 
+If you type ':quit' then the program will quit. 
+ */
