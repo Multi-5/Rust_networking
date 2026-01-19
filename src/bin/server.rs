@@ -28,6 +28,8 @@ fn flip_coin() -> &'static str {
 }
 
 fn main() {
+    let mut hangman_active: bool = false;
+
     // Allow overriding the listening address via SERVER_ADDR environment variable.
     let local = env::var("SERVER_ADDR").unwrap_or_else(|_| DEFAULT_LOCAL.to_string());
     println!("Binding server to {}", local);
@@ -93,6 +95,8 @@ fn main() {
                         try_client_name_change(&mut clients, &mut name_rejected, sender, content);
 
                         continue;
+                    } else if content.starts_with(":h") {
+                        handle_hangman_command(&mut clients, &mut name_rejected, sender, content, hangman_active)
                     }
 
                     // Normal message: find display name for sender (fallback to sender addr)
@@ -133,6 +137,24 @@ fn main() {
 
         sleep();
     }
+}
+
+fn handle_hangman_command(
+    clients: &mut Vec<(TcpStream, String, String)>, 
+    name_rejected: &mut HashSet<String>, 
+    sender: &str, 
+    content: &str,
+    game_active: &bool
+) {
+    if let Some(rest) = content.strip_prefix(":start ") {
+    if *game_active {
+        // TODO: send to all
+        return;
+    }
+    // rest = arguments after :start
+} else if content == ":end" {
+    // end game
+}
 }
 
 fn try_client_name_change(
