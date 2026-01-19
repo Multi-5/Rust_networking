@@ -142,6 +142,7 @@ fn check_letter(input: &str, game_state: &mut GameState) -> Result<bool, String>
 
 fn create_hangman_match(pl_creator: &str, word: &str, pl_guesser: &str) -> GameState {
     let mut game = GameState {
+        ongoing: true,
         secret_word: String::from(word),
         guessed_letters: Vec::new(),
         guesser_name: String::from(pl_guesser),
