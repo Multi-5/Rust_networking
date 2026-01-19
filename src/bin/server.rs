@@ -5,7 +5,7 @@ use rand::Rng;
 use std::sync::mpsc;
 use std::collections::HashSet;
 use std::thread;
-
+use chatproject::shared::hangman::*;
 
 // Default bind address. Can be overridden with the SERVER_ADDR env var, e.g.
 // SERVER_ADDR=127.0.0.1 :9090 cargo run --bin server
@@ -56,6 +56,8 @@ fn send_to_client(clients: &mut Vec<(TcpStream, String, String)>, recipient: &st
 }
 
 fn main() {
+    let mut hangman_active: bool = false;
+
     // Allow overriding the listening address via SERVER_ADDR environment variable.
     let local = env::var("SERVER_ADDR").unwrap_or_else(|_| DEFAULT_LOCAL.to_string());
     println!("Binding server to {}", local);
@@ -173,8 +175,11 @@ fn main() {
                             // send announcement to others
                             send_to_others(&mut clients, sender, &to_send);
                         }
+                        try_client_name_change(&mut clients, &mut name_rejected, sender, content);
 
                         continue;
+                    } else if content.starts_with(":h") {
+                        handle_hangman_command(&mut clients, &mut name_rejected, sender, content, hangman_active)
                     }
 
                     // list connected users (send only to requesting client)
@@ -221,4 +226,105 @@ fn main() {
         sleep();
     }
 }
+
+fn handle_hangman_command(
+    clients: &mut Vec<(TcpStream, String, String)>, 
+    name_rejected: &mut HashSet<String>, 
+    sender: &str, 
+    content: &str,
+    game_active: &bool
+) {
+    if let Some(rest) = content.strip_prefix(":start ") {
+    if *game_active {
+        // TODO: send to all
+        return;
+    }
+    // rest = arguments after :start
+} else if content == ":end" {
+    // end game
+}
+}
+
+fn try_client_name_change(
+    clients: &mut Vec<(TcpStream, String, String)>, 
+    name_rejected: &mut HashSet<String>, 
+    sender: &str, 
+    content: &str
+) {
+    // registration: try to update the stored display name for this client
+    let name = content[6..].to_string();
+    println!("Registering name '{}' for {}", name, sender);
+
+    // If the name is already taken by another client (different addr), inform the registering client only
+    let name_taken = clients.iter().any(|(_, addr, disp)| addr != sender && disp == &name);
+    if name_taken {
+        let reject = format!("name_taken: {}\nchange the name with :name <new_name>", name);
+        let mut buf = reject.into_bytes();
+        buf.resize(MSG_SIZE, 0);
+        let old_clients = std::mem::take(clients);
+
+        *clients = old_clients
+        .into_iter()
+        .map(|(mut client, addr, disp)| {
+            if addr == sender {
+                let _ = client.write_all(&buf);
+                name_rejected.insert(addr.clone());
+            }
+            (client, addr, disp)
+        })
+        .collect();
+    } else {
+        // accept the registration and update the stored display name
+        
+        let old_clients = std::mem::take(clients);
+
+        *clients = old_clients
+            .into_iter()
+            .map(|(stream, addr, disp)| {
+                if addr == sender {
+                    (stream, addr, name.clone())
+                } else {
+                    (stream, addr, disp)
+                }
+            })
+            .collect();
+        // If this sender was previously rejected, send a one-off confirmation to them
+        if name_rejected.remove(sender) {
+            let confirm = format!("{} is unique and was appended to your client!", name);
+            let mut confirm_buf = confirm.as_bytes().to_vec();
+            confirm_buf.resize(MSG_SIZE, 0);
+            let old_clients = std::mem::take(clients);
+
+            *clients = old_clients
+            .into_iter()
+            .map(|(mut client, addr, disp)| {
+                if addr == sender {
+                    let _ = client.write_all(&confirm_buf);
+                }
+                (client, addr, disp)
+            })
+            .collect();
+        }
+
+        // announce join to others (don't send the join announcement back to the registering client)
+        let announce = format!("{} joined", name);
+        println!("Announcing: {}", announce);
+        let mut to_send = announce.into_bytes();
+        to_send.resize(MSG_SIZE, 0);
+        let old_clients = std::mem::take(clients);
+
+        *clients = old_clients
+        .into_iter()
+        .filter_map(|(mut client, addr, disp)| {
+            if addr == sender {
+                Some((client, addr, disp))
+            } else {
+                client.write_all(&to_send).map(|_| (client, addr, disp)).ok()
+            }
+        })
+        .collect();
+
+    }
+}
+
 
