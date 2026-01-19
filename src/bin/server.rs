@@ -125,61 +125,12 @@ fn main() {
                     let content = &recv_msg[pos + 3..];
 
                     if content.starts_with(":name ") {
-                        // registration: update the stored display name for this client
-                        let name = content[6..].to_string();
-                        println!("Registering name '{}' for {}", name, sender);
-
-                        // If the name is already taken by another client (different addr), inform the new client only
-                        let name_taken = clients.iter().any(|(_, addr, disp)| addr != sender && disp == &name);
-                        if name_taken {
-                            let reject = format!("name_taken: {}\nchange the name with :name <new_name>", name);
-                            let mut buf = reject.into_bytes();
-                            buf.resize(MSG_SIZE, 0);
-                            // notify the registering client (by addr) without moving the clients vec
-                            send_to_client(&mut clients, sender, &buf);
-                            // record that this sender was rejected so a later successful registration can be confirmed
-                            name_rejected.insert(sender.to_string());
-                        } else {
-                            // determine previous display name for this sender
-                            let mut previous_name: Option<String> = None;
-                            for (_stream, addr, disp) in clients.iter() {
-                                if addr == sender {
-                                    previous_name = Some(disp.clone());
-                                    break;
-                                }
-                            }
-
-                            // accept the registration and update the stored display name (in-place)
-                            for (_stream, addr, disp) in clients.iter_mut() {
-                                if addr == sender {
-                                    *disp = name.clone();
-                                }
-                            }
-
-                            // If this sender was previously rejected, send a one-off confirmation to them
-                            if name_rejected.remove(sender) {
-                                let confirm = format!("{} is unique and was appended to your client!", name);
-                                let mut confirm_buf = confirm.as_bytes().to_vec();
-                                confirm_buf.resize(MSG_SIZE, 0);
-                                send_to_client(&mut clients, sender, &confirm_buf);
-                            }
-
-                            // Announce either a join or a name-change to other clients
-                            let announce = match previous_name {
-                                Some(prev) if prev != sender && prev != name => format!("{} changed the name to {}", prev, name),
-                                _ => format!("{} joined", name),
-                            };
-                            println!("Announcing: {}", announce);
-                            let mut to_send = announce.into_bytes();
-                            to_send.resize(MSG_SIZE, 0);
-                            // send announcement to others
-                            send_to_others(&mut clients, sender, &to_send);
-                        }
+                        // delegate name registration/change handling to helper
                         try_client_name_change(&mut clients, &mut name_rejected, sender, content);
-
                         continue;
-                    } else if content.starts_with(":h") {
-                        handle_hangman_command(&mut clients, &mut name_rejected, sender, content, hangman_active)
+                    } else if content.starts_with(":hang") {
+                        handle_hangman_command(&mut clients, &mut name_rejected, sender, content, &mut hangman_active);
+                        continue;
                     }
 
                     // list connected users (send only to requesting client)
@@ -228,28 +179,63 @@ fn main() {
 }
 
 fn handle_hangman_command(
-    clients: &mut Vec<(TcpStream, String, String)>, 
-    name_rejected: &mut HashSet<String>, 
-    sender: &str, 
+    clients: &mut Vec<(TcpStream, String, String)>,
+    _name_rejected: &mut HashSet<String>,
+    sender: &str,
     content: &str,
-    game_active: &bool
+    game_active: &mut bool,
 ) {
-    if let Some(rest) = content.strip_prefix(":start ") {
-    if *game_active {
-        // TODO: send to all
+    // get display name of sender
+    let sender_name = clients.iter().find(|(_, addr, _)| addr == sender).map(|(_, _, d)| d.clone()).unwrap_or_else(|| sender.to_string());
+
+    // :hang start <opts>
+    if let Some(rest) = content.strip_prefix(":hang start") {
+        if *game_active {
+            let msg = "hangman: a game is already active".to_string();
+            let mut buf = msg.into_bytes(); buf.resize(MSG_SIZE, 0);
+            send_to_client(clients, sender, &buf);
+            return;
+        }
+        *game_active = true;
+        let rest = rest.trim();
+        let announce = if rest.is_empty() {
+            format!("Hangman started by {}", sender_name)
+        } else {
+            format!("Hangman started by {}: {}", sender_name, rest)
+        };
+        let mut buf = announce.into_bytes(); buf.resize(MSG_SIZE, 0);
+        send_to_all(clients, &buf);
         return;
     }
-    // rest = arguments after :start
-} else if content == ":end" {
-    // end game
-}
+
+    // :hang end
+    if content.trim() == ":hang end" {
+        if !*game_active {
+            let msg = "hangman: no active game".to_string();
+            let mut buf = msg.into_bytes(); buf.resize(MSG_SIZE, 0);
+            send_to_client(clients, sender, &buf);
+            return;
+        }
+        *game_active = false;
+        let announce = format!("Hangman ended by {}", sender_name);
+        let mut buf = announce.into_bytes(); buf.resize(MSG_SIZE, 0);
+        send_to_all(clients, &buf);
+        return;
+    }
+
+    // Other hangman commands (guesses etc.) currently broadcast to all
+    if content.starts_with(":hang ") {
+        let announce = format!("{}", &content[6..].trim());
+        let mut buf = announce.into_bytes(); buf.resize(MSG_SIZE, 0);
+        send_to_all(clients, &buf);
+    }
 }
 
 fn try_client_name_change(
-    clients: &mut Vec<(TcpStream, String, String)>, 
-    name_rejected: &mut HashSet<String>, 
-    sender: &str, 
-    content: &str
+    clients: &mut Vec<(TcpStream, String, String)>,
+    name_rejected: &mut HashSet<String>,
+    sender: &str,
+    content: &str,
 ) {
     // registration: try to update the stored display name for this client
     let name = content[6..].to_string();
@@ -261,70 +247,38 @@ fn try_client_name_change(
         let reject = format!("name_taken: {}\nchange the name with :name <new_name>", name);
         let mut buf = reject.into_bytes();
         buf.resize(MSG_SIZE, 0);
-        let old_clients = std::mem::take(clients);
-
-        *clients = old_clients
-        .into_iter()
-        .map(|(mut client, addr, disp)| {
-            if addr == sender {
-                let _ = client.write_all(&buf);
-                name_rejected.insert(addr.clone());
-            }
-            (client, addr, disp)
-        })
-        .collect();
-    } else {
-        // accept the registration and update the stored display name
-        
-        let old_clients = std::mem::take(clients);
-
-        *clients = old_clients
-            .into_iter()
-            .map(|(stream, addr, disp)| {
-                if addr == sender {
-                    (stream, addr, name.clone())
-                } else {
-                    (stream, addr, disp)
-                }
-            })
-            .collect();
-        // If this sender was previously rejected, send a one-off confirmation to them
-        if name_rejected.remove(sender) {
-            let confirm = format!("{} is unique and was appended to your client!", name);
-            let mut confirm_buf = confirm.as_bytes().to_vec();
-            confirm_buf.resize(MSG_SIZE, 0);
-            let old_clients = std::mem::take(clients);
-
-            *clients = old_clients
-            .into_iter()
-            .map(|(mut client, addr, disp)| {
-                if addr == sender {
-                    let _ = client.write_all(&confirm_buf);
-                }
-                (client, addr, disp)
-            })
-            .collect();
-        }
-
-        // announce join to others (don't send the join announcement back to the registering client)
-        let announce = format!("{} joined", name);
-        println!("Announcing: {}", announce);
-        let mut to_send = announce.into_bytes();
-        to_send.resize(MSG_SIZE, 0);
-        let old_clients = std::mem::take(clients);
-
-        *clients = old_clients
-        .into_iter()
-        .filter_map(|(mut client, addr, disp)| {
-            if addr == sender {
-                Some((client, addr, disp))
-            } else {
-                client.write_all(&to_send).map(|_| (client, addr, disp)).ok()
-            }
-        })
-        .collect();
-
+        send_to_client(clients, sender, &buf);
+        name_rejected.insert(sender.to_string());
+        return;
     }
+
+    // determine previous display name for this sender
+    let previous_name = clients.iter().find(|(_, addr, _)| addr == sender).map(|(_, _, d)| d.clone());
+
+    // accept the registration and update the stored display name (in-place)
+    for (_stream, addr, disp) in clients.iter_mut() {
+        if addr == sender {
+            *disp = name.clone();
+        }
+    }
+
+    // If this sender was previously rejected, send a one-off confirmation to them
+    if name_rejected.remove(sender) {
+        let confirm = format!("{} is unique and was appended to your client!", name);
+        let mut confirm_buf = confirm.as_bytes().to_vec();
+        confirm_buf.resize(MSG_SIZE, 0);
+        send_to_client(clients, sender, &confirm_buf);
+    }
+
+    // Announce either a join or a name-change to other clients
+    let announce = match previous_name {
+        Some(prev) if prev != sender && prev != name => format!("{} changed the name to {}", prev, name),
+        _ => format!("{} joined", name),
+    };
+    println!("Announcing: {}", announce);
+    let mut to_send = announce.into_bytes();
+    to_send.resize(MSG_SIZE, 0);
+    send_to_others(clients, sender, &to_send);
 }
 
 
