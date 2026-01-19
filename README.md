@@ -30,9 +30,10 @@ The client supports a few simple text commands. Send commands by typing them and
 |---|---|
 | :name <name> | Register or change your display name. Server enforces uniqueness. If a name is already taken the client will receive `name_taken: <name>\nchange the name with :name <new_name>` and should choose a different name. If you retry after a rejection and the name becomes unique, the registering client will receive a one-time confirmation: `<new_name> is unique and was appended to your client!` and others will see `<new_name> joined`. |
 | :flip | Ask the server to flip a coin. The server broadcasts the result (heads/tails) to all clients, including the requester. |
-| :quit | Exit the client locally. This closes the connection and stops the client process. |
+| :list | Shows a list of all connected users |
+| :quit | The client closes the connection to the server. |
 
 ## Notes & troubleshooting
 
 - If you run the client via `cargo run --bin client` and want to pass a name argument, remember to add `--` before the name so Cargo forwards it to the program (`cargo run --bin client -- kai`).
-- The server uses a fixed-size message frame (120 bytes). Messages longer than that will be truncated.
+- The server uses a fixed-size message frame (500 bytes). Messages longer than that will be truncated.
