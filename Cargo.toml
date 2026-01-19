@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 mini-redis = "0.4"
+serde = { version = "1.0.228", features = ["derive"] }
 
 [[bin]]
 name = "server"

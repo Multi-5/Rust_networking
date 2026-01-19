@@ -5,7 +5,7 @@ use std::sync::mpsc::{self, TryRecvError};
 use std::thread;
 use std::time::Duration;
 
-const LOCAL: &str = "127.0.0.1:9090";
+const LOCAL: &str = "172.29.187.67:9090";
 const MSG_SIZE: usize = 32;
 
 fn main() {
