@@ -7,21 +7,30 @@ use std::collections::HashSet;
 use std::thread;
 use chatproject::shared::hangman::*;
 
-// Default bind address. Can be overridden with the SERVER_ADDR env var, e.g.
-// SERVER_ADDR=127.0.0.1 :9090 cargo run --bin server
-// Using 127.0.0.1 lets other machines connect to this host.
+// The server implements a small thread-per-connection TCP chat server. Each
+// client reader runs in its own thread and forwards framed messages to the
+// main loop via an mpsc channel. The main loop owns the writable handles and
+// the `clients` list so that broadcasts and state changes are performed
+// centrally without additional locking.
+
+// Default bind address. Can be overridden with the SERVER_ADDR env var.
+// The server binds a TcpListener to this address at startup.
 const DEFAULT_LOCAL: &str = "127.0.0.1:9090";
+
+// Message framing size in bytes. All network reads and writes use this fixed
+// buffer length. Messages are padded with zeros when shorter. 
 const MSG_SIZE: usize = 500;
 
-//allows loop to rest while it's not receiving messages
-//will allow the thread to sleep for a moment, and we can call it passing the time duration
+// Pause briefly to avoid busy-waiting in loops that poll sockets or channels.
+// A small sleep keeps CPU usage low while still providing responsive
+// behaviour for this example server.
 fn sleep() {
     thread::sleep(::std::time::Duration::from_millis(100));
 }
 
 
+// Simple utility to return a 50/50 result for the :flip command. .
 fn flip_coin() -> &'static str {
-    //  flip a coin: 50/50
     let mut rng = rand::thread_rng();
     if rng.gen_bool(0.5) { "heads" } else { "tails" }
 }
@@ -73,10 +82,18 @@ fn main() {
         if let Ok((mut socket, addr)) = server.accept() {
             println!("Client {} connected", addr);
 
+            // Clone the transmitter for the new client thread. The client
+            // thread will send framed messages into the shared channel so the
+            // central loop can perform routing and broadcasting.
             let tx = tx.clone();
             // store (stream, addr, display_name) - display_name defaults to addr
             clients.push((socket.try_clone().expect("failed to clone client"), addr.to_string(), addr.to_string()));
 
+            // Start a dedicated reader thread for this client. The thread
+            // performs blocking reads of fixed-size frames and forwards
+            // messages to the main loop via the channel. The main loop keeps
+            // writable handles and performs broadcasts to avoid concurrent
+            // writes to the same TcpStream.
             thread::spawn(move || loop {
                 let mut buff = vec![0; MSG_SIZE];
 
@@ -139,7 +156,9 @@ fn main() {
                         continue;
                     }
 
-                    // list connected users (send only to requesting client)
+                    // Handle a private :list request. The requesting client
+                    // asks for the current list of display names. Build a
+                    // multi-line response and send it only to that client.
                     if content == ":list" {
                         // build a multi-line list of display names (one per line)
                         let mut resp = String::from("connected:\n");
@@ -238,6 +257,14 @@ fn handle_hangman_command(
     }
 }
 
+// try_client_name_assignment centralizes the name-change flow. It follows a
+// small three-phase approach:
+//  1) read-only checks for name collisions and the previous name
+//  2) mutate the client's display_name if the name is available
+//  3) send appropriate messages (reject, confirmation or announce) after
+//     the mutation so there are no active borrows when writing to sockets
+// This ordering prevents borrow/ownership conflicts when updating the
+// `clients` Vec while also writing to streams owned by the same Vec.
 fn try_client_name_assignment(
     clients: &mut Vec<(TcpStream, String, String)>, 
     name_rejected: &mut HashSet<String>, 
