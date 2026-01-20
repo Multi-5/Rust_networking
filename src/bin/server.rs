@@ -125,10 +125,11 @@ fn main() {
                     let content = &recv_msg[pos + 3..];
 
                     if content.starts_with(":name ") {
-                        try_client_name_change(&mut clients, &mut name_rejected, sender, content);
+                        try_client_name_assignment(&mut clients, &mut name_rejected, sender, content);
                         continue;
-                    } else if content.starts_with(":h") {
+                    } else if content.starts_with(":hang") {
                         handle_hangman_command(&mut clients, &mut name_rejected, sender, content, &mut hangman_active);
+                        continue;
                     }
 
                     // list connected users (send only to requesting client)
@@ -177,24 +178,59 @@ fn main() {
 }
 
 fn handle_hangman_command(
-    clients: &mut Vec<(TcpStream, String, String)>, 
-    name_rejected: &mut HashSet<String>, 
-    sender: &str, 
+    clients: &mut Vec<(TcpStream, String, String)>,
+    _name_rejected: &mut HashSet<String>,
+    sender: &str,
     content: &str,
     game_active: &mut bool,
 ) {
-    if let Some(rest) = content.strip_prefix(":start ") {
-    if *game_active {
-        // TODO: send to all
+    // get display name of sender
+    let sender_name = clients.iter().find(|(_, addr, _)| addr == sender).map(|(_, _, d)| d.clone()).unwrap_or_else(|| sender.to_string());
+
+    // :hang start <opts>
+    if let Some(rest) = content.strip_prefix(":hang start") {
+        if *game_active {
+            let msg = "hangman: a game is already active".to_string();
+            let mut buf = msg.into_bytes(); buf.resize(MSG_SIZE, 0);
+            send_to_client(clients, sender, &buf);
+            return;
+        }
+        *game_active = true;
+        let rest = rest.trim();
+        let announce = if rest.is_empty() {
+            format!("Hangman started by {}", sender_name)
+        } else {
+            format!("Hangman started by {}: {}", sender_name, rest)
+        };
+        let mut buf = announce.into_bytes(); buf.resize(MSG_SIZE, 0);
+        send_to_all(clients, &buf);
         return;
     }
-    // rest = arguments after :start
-} else if content == ":end" {
-    // end game
-}
+
+    // :hang end
+    if content.trim() == ":hang end" {
+        if !*game_active {
+            let msg = "hangman: no active game".to_string();
+            let mut buf = msg.into_bytes(); buf.resize(MSG_SIZE, 0);
+            send_to_client(clients, sender, &buf);
+            return;
+        }
+        *game_active = false;
+        let announce = format!("Hangman ended by {}", sender_name);
+        let mut buf = announce.into_bytes(); buf.resize(MSG_SIZE, 0);
+        send_to_all(clients, &buf);
+        return;
+    }
+
+    // Other hangman commands (guesses etc.) currently broadcast to all
+    if content.starts_with(":hang ") {
+        let announce = format!("{}", &content[6..].trim());
+        let mut buf = announce.into_bytes(); buf.resize(MSG_SIZE, 0);
+        send_to_all(clients, &buf);
+    }
 }
 
-fn try_client_name_change(
+fn try_client_name_assignment(
     clients: &mut Vec<(TcpStream, String, String)>, 
     name_rejected: &mut HashSet<String>, 
     sender: &str, 
