@@ -30,6 +30,10 @@ The client supports a few simple text commands. Send commands by typing them and
 |---|---|
 | :name <name> | Register or change your display name. Server enforces uniqueness. If a name is already taken the client will receive `name_taken: <name>\nchange the name with :name <new_name>` and should choose a different name. If you retry after a rejection and the name becomes unique, the registering client will receive a one-time confirmation: `<new_name> is unique and was appended to your client!` and others will see `<new_name> joined`. |
 | :flip | Ask the server to flip a coin. The server broadcasts the result (heads/tails) to all clients, including the requester. |
+| :hang start <opts> | Starts a hangman game |
+| :hang end | Ends the current hangman game |
+| :hang <guess/command> | Sends a hangman guess/command |
+| :help | Shows a list of all commands |
 | :list | Shows a list of all connected users |
 | :quit | The client closes the connection to the server. |
 
