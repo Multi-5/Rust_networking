@@ -99,6 +99,13 @@ fn main() {
                                 let framed = format!("[{}]::{}", addr, msg);
                                 tx.send(framed).expect("failed to send list request to rx");
                             }
+                            ":help" => {
+                                let help_msg = "Available commands:\n:name <name> - set/change your display name (must be unique)\n:list - list connected users\n:flip - flip a coin (result sent to all)\n:hang start <opts> - start a hangman game\n:hang end - end the current hangman game\n:hang <guess/command> - send a hangman guess/command\n:quit - disconnect from server".to_string();
+                                let mut buf = help_msg.into_bytes();
+                                buf.resize(MSG_SIZE, 0);
+                                // Send help only to the requesting client (do not forward to main loop)
+                                socket.write_all(&buf).expect("failed to send help message to client");
+                            }
                             _ => {
                                 // Prefix with sender addr so main thread can identify sender
                                 let framed = format!("[{}]::{}", addr, msg);
@@ -145,6 +152,7 @@ fn main() {
                         send_to_client(&mut clients, sender, &buf);
                         continue;
                     }
+                    
 
                     // Normal message: find display name for sender (fallback to sender addr)
                     let sender_name = clients.iter().find(|(_, addr, _)| addr == sender).map(|(_, _, disp)| disp.clone()).unwrap_or_else(|| sender.to_string());

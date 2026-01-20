@@ -7,6 +7,7 @@ use std::thread;
 use std::time::Duration;
 
 const LOCAL: &str = "127.0.0.1:9090";
+//const LOCAL: &str = "172.20.10.3:9090";
 const MSG_SIZE: usize = 500;
 
 fn main() {
