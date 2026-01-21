@@ -30,9 +30,9 @@ The client supports a few simple text commands. Send commands by typing them and
 |---|---|
 | :name <name> | Register or change your display name. Server enforces uniqueness. If a name is already taken the client will receive `name_taken: <name>\nchange the name with :name <new_name>` and should choose a different name. If you retry after a rejection and the name becomes unique, the registering client will receive a one-time confirmation: `<new_name> is unique and was appended to your client!` and others will see `<new_name> joined`. |
 | :flip | Ask the server to flip a coin. The server broadcasts the result (heads/tails) to all clients, including the requester. |
-| :hang start <opts> | Starts a hangman game |
+| :hang start <word> | Starts a hangman game where the given word has to be guessed by others on the server |
 | :hang end | Ends the current hangman game |
-| :hang <guess/command> | Sends a hangman guess/command |
+| :hang guess <letter> | Sends a hangman guess. Must be one letter. |
 | :help | Shows a list of all commands |
 | :list | Shows a list of all connected users |
 | :quit | The client closes the connection to the server. |
@@ -41,3 +41,9 @@ The client supports a few simple text commands. Send commands by typing them and
 
 - If you run the client via `cargo run --bin client` and want to pass a name argument, remember to add `--` before the name so Cargo forwards it to the program (`cargo run --bin client -- kai`).
 - The server uses a fixed-size message frame (500 bytes). Messages longer than that will be truncated.
+
+## Hangman
+
+This implementation of hangman allows all players on the server to guess. Diacritics are ignored, so `é` is treated the same as `e`, etc. Special characters can be used, but can make the game much harder.
+If within 10 guesses, the correct word is not found, the game enters Game over state. Server members can then still continue guessing to unveil the word eventually, or they can end the game with `:hang end`
+The match will end if the word is found, and (unless they exceeded the maximum amount of attempts) they have won.
