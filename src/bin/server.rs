@@ -136,7 +136,7 @@ fn main() {
                                 tx.send(framed).expect("failed to send list request to rx");
                             }
                             ":help" => {
-                                let help_msg = "Available commands:\n:name <name> - set/change your display name (must be unique)\n:list - list connected users\n:flip - flip a coin (result sent to all)\n:hang start <opts> - start a hangman game\n:hang end - end the current hangman game\n:hang <guess/command> - send a hangman guess/command\n:quit - disconnect from server".to_string();
+                                let help_msg = "Available commands:\n:name <name> - set/change your display name (must be unique)\n:list - list connected users\n:flip - flip a coin (result sent to all)\n:hang start <word> - start a hangman game\n:hang end - end the current hangman game\n:hang guess <letter> - send a hangman guess, must be one letter\n:quit - disconnect from server".to_string();
                                 let mut buf = help_msg.into_bytes();
                                 buf.resize(MSG_SIZE, 0);
                                 // Send help only to the requesting client (do not forward to main loop)
