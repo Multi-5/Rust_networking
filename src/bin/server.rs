@@ -287,6 +287,9 @@ fn handle_hangman_command(
                     rest.trim(),
                     render_hangman_state(game)
                 );
+                if is_word_solved(&hangman_state.as_ref().unwrap()) {
+                   hangman_state.take(); 
+                }   
                 send_to_all_text(clients, &msg);
             }
             Ok(false) => {
@@ -367,7 +370,7 @@ fn try_client_name_assignment(
 
     let announce = match previous_name {
         Some(prev) if prev != sender && prev != name =>
-            format!("{} changed the name to {}", prev, name),
+            format!("{} changed their name to {}", prev, name),
         _ => format!("{} joined", name),
     };
 

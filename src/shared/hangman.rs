@@ -112,7 +112,9 @@ pub fn render_hangman_state(state: &GameState) -> String {
         incorrect_guesses
     ));
 
-    if incorrect_guesses < HANGMAN_STRINGS.len() - 1 {
+    if is_word_solved(state) {
+        out.push_str("\nSuccess! You guessed the word - hangman is safe.");
+    } else if incorrect_guesses < HANGMAN_STRINGS.len() - 1 {
         out.push_str(HANGMAN_STRINGS[incorrect_guesses]);
         out.push_str("\nHangman can still be saved - guess wisely!");
     } else {
@@ -166,6 +168,15 @@ fn display_hangman_state(state: &GameState) {
     }
 }
 
+pub fn is_word_solved(state: &GameState) -> bool {
+    state.secret_word
+        .chars()
+        .filter(|c| c.is_alphabetic())
+        .all(|c| {
+            state.guessed_letters
+                .contains(&c.to_lowercase().next().unwrap())
+        })
+}
 
 pub fn check_letter(input: &str, game_state: &mut GameState) -> Result<bool, String> {
     if !game_state.ongoing {
@@ -188,37 +199,20 @@ pub fn check_letter(input: &str, game_state: &mut GameState) -> Result<bool, Str
         .chars()
         .any(|c| c == letter);
 
-
+    if is_word_solved(game_state) {
+        game_state.ongoing = false;
+    }
 
     Ok(letter_in_word)
 }
 
 
 pub fn create_hangman_match(pl_creator: &str, word: &str) -> GameState {
-    let mut game = GameState {
+    let game = GameState {
         ongoing: true,
         secret_word: String::from(word),
         guessed_letters: Vec::new(),
         word_suggester_name: String::from(pl_creator),
     };
     game
-}
-
-fn check_examples() {
-
-    let mut game: GameState = create_hangman_match("a", "Hangman");
-
-    // Successful guess
-    match check_letter("h", &mut game) {
-        Ok(true) => println!("Letter is in the word!"),
-        Ok(false) => println!("Letter is not in the word."),
-        Err(e) => println!("Error: {}", e),
-    }
-
-    // Duplicate guess
-    match check_letter("h", &mut game) {
-        Ok(true) => println!("Letter is in the word!"),
-        Ok(false) => println!("Letter is not in the word."),
-        Err(e) => println!("Error: {}", e),
-    }
 }

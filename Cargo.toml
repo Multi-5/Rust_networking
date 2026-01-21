@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 serde = { version = "1.0.228", features = ["derive"] }
 rand = "0.8"
+unicode-normalization = "0.1"
 
 [[bin]]
 name = "server"
