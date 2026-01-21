@@ -35,6 +35,25 @@ fn flip_coin() -> &'static str {
     if rng.gen_bool(0.5) { "heads" } else { "tails" }
 }
 
+// Wraps below helper function, but accepts Strings
+fn send_to_all_text(clients: &mut Vec<(TcpStream, String, String)>, msg: &str) {
+    let mut buf = msg.as_bytes().to_vec();
+    buf.resize(MSG_SIZE, 0);
+    send_to_all(clients, &buf);
+}
+
+// Wraps below helper function, but accepts Strings
+fn send_to_client_text(
+    clients: &mut Vec<(TcpStream, String, String)>,
+    recipient: &str,
+    msg: &str,
+) {
+    let mut buf = msg.as_bytes().to_vec();
+    buf.resize(MSG_SIZE, 0);
+    send_to_client(clients, recipient, &buf);
+}
+
+
 // Helper: send buffer to all clients, removing any that fail
 fn send_to_all(clients: &mut Vec<(TcpStream, String, String)>, buf: &[u8]) {
     let mut remove_idx: Vec<usize> = Vec::new();
@@ -65,7 +84,7 @@ fn send_to_client(clients: &mut Vec<(TcpStream, String, String)>, recipient: &st
 }
 
 fn main() {
-    let mut hangman_active: bool = false;
+    let mut hangman_state: Option<GameState> = None;
 
     // Allow overriding the listening address via SERVER_ADDR environment variable.
     let local = env::var("SERVER_ADDR").unwrap_or_else(|_| DEFAULT_LOCAL.to_string());
@@ -152,7 +171,7 @@ fn main() {
                         try_client_name_assignment(&mut clients, &mut name_rejected, sender, content);
                         continue;
                     } else if content.starts_with(":hang") {
-                        handle_hangman_command(&mut clients, &mut name_rejected, sender, content, &mut hangman_active);
+                        handle_hangman_command(&mut clients, sender, content, &mut hangman_state);
                         continue;
                     }
 
@@ -206,55 +225,86 @@ fn main() {
 
 fn handle_hangman_command(
     clients: &mut Vec<(TcpStream, String, String)>,
-    _name_rejected: &mut HashSet<String>,
     sender: &str,
     content: &str,
-    game_active: &mut bool,
+    hangman_state: &mut Option<GameState>,
 ) {
     // get display name of sender
     let sender_name = clients.iter().find(|(_, addr, _)| addr == sender).map(|(_, _, d)| d.clone()).unwrap_or_else(|| sender.to_string());
 
-    // :hang start <opts>
     if let Some(rest) = content.strip_prefix(":hang start") {
-        if *game_active {
-            let msg = "hangman: a game is already active".to_string();
-            let mut buf = msg.into_bytes(); buf.resize(MSG_SIZE, 0);
-            send_to_client(clients, sender, &buf);
+        if hangman_state.is_some() {
+            send_to_client_text(clients, sender, "hangman: game already active");
             return;
         }
-        *game_active = true;
-        let rest = rest.trim();
-        let announce = if rest.is_empty() {
-            format!("Hangman started by {}", sender_name)
-        } else {
-            format!("Hangman started by {}: {}", sender_name, rest)
-        };
-        let mut buf = announce.into_bytes(); buf.resize(MSG_SIZE, 0);
-        send_to_all(clients, &buf);
+
+        let secret = rest.trim();
+        if secret.is_empty() {
+            send_to_client_text(clients, sender, "usage: :hang start <word>");
+            return;
+        }
+
+        *hangman_state = Some(create_hangman_match(
+            &sender,
+            secret,
+        ));
+
+        let announce = format!(
+            "Hangman started by {}\n{}",
+            sender_name,
+            render_hangman_state(hangman_state.as_ref().unwrap())
+        );
+
+        send_to_all_text(clients, &announce);
         return;
     }
+
 
     // :hang end
     if content.trim() == ":hang end" {
-        if !*game_active {
-            let msg = "hangman: no active game".to_string();
-            let mut buf = msg.into_bytes(); buf.resize(MSG_SIZE, 0);
-            send_to_client(clients, sender, &buf);
+        if hangman_state.is_none() {
+            send_to_client_text(clients, sender, "hangman: no active game");
             return;
         }
-        *game_active = false;
-        let announce = format!("Hangman ended by {}", sender_name);
-        let mut buf = announce.into_bytes(); buf.resize(MSG_SIZE, 0);
-        send_to_all(clients, &buf);
+
+        hangman_state.take();
+        send_to_all_text(clients, "Hangman game ended");
         return;
     }
 
-    // Other hangman commands (guesses etc.) currently broadcast to all
-    if content.starts_with(":hang ") {
-        let announce = format!("{}", &content[6..].trim());
-        let mut buf = announce.into_bytes(); buf.resize(MSG_SIZE, 0);
-        send_to_all(clients, &buf);
+
+    if let Some(rest) = content.strip_prefix(":hang guess ") {
+        let Some(game) = hangman_state.as_mut() else {
+            send_to_client_text(clients, sender, "hangman: no active game");
+            return;
+        };
+
+        match check_letter(rest.trim(), game) {
+            Ok(true) => {
+                let msg = format!(
+                    "{} guessed '{}'\n{}",
+                    sender_name,
+                    rest.trim(),
+                    render_hangman_state(game)
+                );
+                send_to_all_text(clients, &msg);
+            }
+            Ok(false) => {
+                let msg = format!(
+                    "{} guessed '{}' (wrong)\n{}",
+                    sender_name,
+                    rest.trim(),
+                    render_hangman_state(game)
+                );
+                send_to_all_text(clients, &msg);
+            }
+            Err(e) => {
+                send_to_client_text(clients, sender, &e);
+            }
+        }
+        return;
     }
+
 }
 
 // try_client_name_assignment centralizes the name-change flow. It follows a
