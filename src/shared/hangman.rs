@@ -121,7 +121,7 @@ pub fn render_hangman_state(state: &GameState) -> String {
         incorrect_guesses
     ));
 
-    if is_word_solved(state) {
+    if is_word_solved(state) && incorrect_guesses < HANGMAN_STRINGS.len() - 1 {
         out.push_str("\nSuccess! You guessed the word - hangman is safe.");
     } else if incorrect_guesses < HANGMAN_STRINGS.len() - 1 {
         out.push_str(HANGMAN_STRINGS[incorrect_guesses]);
@@ -136,46 +136,6 @@ pub fn render_hangman_state(state: &GameState) -> String {
     out
 }
 
-fn display_hangman_state(state: &GameState) {
-    let displayed_word: String = state.secret_word
-        .chars()
-        .map(|letter| {
-            if state.guessed_letters.contains(&letter.to_lowercase().next().unwrap()) {
-                letter
-            } else {
-                '_'
-            }
-        })
-        .collect();
-
-    println!("Word: {}", displayed_word);
-
-    // Display previous guesses
-    if state.guessed_letters.is_empty() {
-        println!("Start with your guesses!");
-    } else {
-        println!("Guessed letters: {}", 
-            state.guessed_letters.iter().collect::<String>()
-        );
-    }
-
-    let incorrect_guesses = state.guessed_letters
-        .iter()
-        .filter(|&letter| 
-            !state.secret_word.to_lowercase().contains(letter.to_lowercase().to_string().as_str())
-        )
-        .count();
-
-    println!("Incorrect guesses: {}", incorrect_guesses);
-
-    if incorrect_guesses < HANGMAN_STRINGS.len() - 1 {
-        println!("{}", HANGMAN_STRINGS[incorrect_guesses]);
-        println!("\nhangman can still be saved - guess wisely!")
-    } else {
-        println!("{}", HANGMAN_STRINGS[HANGMAN_STRINGS.len()-1]);
-        print!("\nGame Over! :/")
-    }
-}
 
 pub fn is_word_solved(state: &GameState) -> bool {
     state.secret_word
