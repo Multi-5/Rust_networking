@@ -1,4 +1,6 @@
 use serde::{Serialize, Deserialize};
+use unicode_normalization::UnicodeNormalization;
+
 
 pub const HANGMAN_STRINGS: [&'static str; 10] = [
 r#"
@@ -75,22 +77,29 @@ pub fn render_hangman_state(state: &GameState) -> String {
     let displayed_word: String = state.secret_word
         .chars()
         .map(|letter| {
-            if state.guessed_letters.contains(
-                &letter.to_lowercase().next().unwrap()
-            ) {
-                letter
+            let normalized_letter = normalize_char(letter);
+            if state.guessed_letters
+                .iter()
+                .any(|&guess| guess == normalized_letter)
+            {
+                letter  // keep original accent for display
             } else {
                 '_'
             }
         })
         .collect();
 
+
+    let normalized_word: Vec<char> = state.secret_word
+        .chars()
+        .map(normalize_char)
+        .collect();
+
     let incorrect_guesses = state.guessed_letters
         .iter()
-        .filter(|&letter|
-            !state.secret_word.to_lowercase().contains(*letter)
-        )
+        .filter(|&&letter| !normalized_word.contains(&letter))
         .count();
+
 
     let mut out = String::new();
     out.push_str("\n");
@@ -172,11 +181,20 @@ pub fn is_word_solved(state: &GameState) -> bool {
     state.secret_word
         .chars()
         .filter(|c| c.is_alphabetic())
-        .all(|c| {
-            state.guessed_letters
-                .contains(&c.to_lowercase().next().unwrap())
-        })
+        .map(normalize_char)
+        .all(|c| state.guessed_letters.contains(&c))
 }
+
+
+
+fn normalize_char(c: char) -> char {
+    if c.is_alphabetic() {
+        c.nfd().next().unwrap().to_lowercase().next().unwrap()
+    } else {
+        c
+    }
+}
+
 
 pub fn check_letter(input: &str, game_state: &mut GameState) -> Result<bool, String> {
     if !game_state.ongoing {
@@ -187,17 +205,19 @@ pub fn check_letter(input: &str, game_state: &mut GameState) -> Result<bool, Str
     }
 
 
-    let letter = input.chars().next().unwrap().to_lowercase().next().unwrap();
+    let letter = normalize_char(input.chars().next().unwrap());
 
     if game_state.guessed_letters.contains(&letter) {
         return Err(String::from("You already guessed this letter"));
     }
 
     game_state.guessed_letters.push(letter);
+
     let letter_in_word = game_state.secret_word
-        .to_lowercase()
         .chars()
+        .map(normalize_char)
         .any(|c| c == letter);
+
 
     if is_word_solved(game_state) {
         game_state.ongoing = false;
